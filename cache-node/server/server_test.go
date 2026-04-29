@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -237,5 +239,46 @@ func TestHandleDelete_BadMethod(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", rr.Code)
+	}
+}
+
+// TestFlightGroup_StampedeProtection fires 50 concurrent calls for the same key
+// and asserts the underlying fn is invoked exactly once (singleflight behaviour).
+func TestFlightGroup_StampedeProtection(t *testing.T) {
+	const goroutines = 50
+	var dbCalls atomic.Int64
+
+	var fg flightGroup
+	var wg sync.WaitGroup
+	start := make(chan struct{}) // all goroutines start at the same time
+
+	results := make([][]byte, goroutines)
+	for i := range goroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			val, err := fg.do("user:1", func() ([]byte, error) {
+				dbCalls.Add(1)
+				time.Sleep(10 * time.Millisecond) // simulate slow DB query
+				return []byte(`{"id":1}`), nil
+			})
+			if err != nil {
+				t.Errorf("goroutine %d: unexpected error: %v", idx, err)
+			}
+			results[idx] = val
+		}(i)
+	}
+
+	close(start) // release all goroutines simultaneously
+	wg.Wait()
+
+	if n := dbCalls.Load(); n != 1 {
+		t.Errorf("expected DB called exactly once, got %d", n)
+	}
+	for i, val := range results {
+		if string(val) != `{"id":1}` {
+			t.Errorf("goroutine %d: got unexpected value %q", i, val)
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	cachedb "github.com/hossainshakhawat/distributed-cache/cache-node/db"
@@ -13,8 +14,9 @@ import (
 
 // Server exposes the Store over HTTP.
 type Server struct {
-	store *store.Store
-	db    *cachedb.DB // optional; nil = no DB integration
+	store  *store.Store
+	db     *cachedb.DB  // optional; nil = no DB integration
+	flight flightGroup  // deduplicates concurrent DB loads for the same key
 }
 
 // New creates a new HTTP server wrapping the given store.
@@ -77,8 +79,11 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	e, hit := s.store.Get(key)
 	if !hit && s.db != nil {
-		// Cache miss: load from PostgreSQL, populate the store.
-		val, err := s.db.Load(key)
+		// Cache miss: only one goroutine loads from DB; others wait and share
+		// the result (singleflight / stampede protection).
+		val, err := s.flight.do(key, func() ([]byte, error) {
+			return s.db.Load(key)
+		})
 		if err != nil {
 			log.Printf("cache-node: load %q: %v", key, err)
 		} else if val != nil {
@@ -168,6 +173,46 @@ func (s *Server) handleDbUpdate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(val)
+}
+
+// flightGroup deduplicates concurrent DB loads for the same key (singleflight).
+// When multiple goroutines miss the cache for the same key simultaneously, only
+// the first one calls the DB; the rest block and receive the same result.
+type flightGroup struct {
+	mu    sync.Mutex
+	calls map[string]*flightCall
+}
+
+type flightCall struct {
+	wg  sync.WaitGroup
+	val []byte
+	err error
+}
+
+func (fg *flightGroup) do(key string, fn func() ([]byte, error)) ([]byte, error) {
+	fg.mu.Lock()
+	if fg.calls == nil {
+		fg.calls = make(map[string]*flightCall)
+	}
+	if c, ok := fg.calls[key]; ok {
+		// In-flight load for this key already running — wait for it.
+		fg.mu.Unlock()
+		c.wg.Wait()
+		return c.val, c.err
+	}
+	c := &flightCall{}
+	c.wg.Add(1)
+	fg.calls[key] = c
+	fg.mu.Unlock()
+
+	c.val, c.err = fn()
+	c.wg.Done()
+
+	fg.mu.Lock()
+	delete(fg.calls, key)
+	fg.mu.Unlock()
+
+	return c.val, c.err
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
