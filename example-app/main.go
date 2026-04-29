@@ -19,7 +19,11 @@ func main() {
 		RouterAddr: routerAddr,
 	})
 
-	database := db.New()
+	connStr := envOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/appdb?sslmode=disable")
+	database, err := db.New(connStr)
+	if err != nil {
+		log.Fatalf("example-app: db: %v", err)
+	}
 	handler := api.New(cacheClient, database, invalidationAddr)
 
 	mux := http.NewServeMux()

@@ -35,9 +35,9 @@ func newFakeRouter(getHit bool, getVal []byte) *httptest.Server {
 	}))
 }
 
-// newTestHandler builds a Handler with a real DB and a cache client pointed at routerURL.
-func newTestHandler(routerURL, invalidationURL string) (*Handler, *db.DB) {
-	database := db.New()
+// newTestHandler builds a Handler with an in-memory DB and a cache client pointed at routerURL.
+func newTestHandler(routerURL, invalidationURL string) (*Handler, db.Store) {
+	database := db.NewInMemory()
 	cacheClient := client.New(client.Options{
 		RouterAddr:     routerURL,
 		LocalCacheSize: 10,

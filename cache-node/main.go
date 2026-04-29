@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/hossainshakhawat/distributed-cache/cache-node/server"
 	"github.com/hossainshakhawat/distributed-cache/cache-node/store"
@@ -13,10 +14,11 @@ import (
 func main() {
 	port := envOrDefault("PORT", "8080")
 	maxKeys := envIntOrDefault("MAX_KEYS", 100_000)
+	loaderURL := envOrDefault("LOADER_ADDR", "")
 	policy := store.PolicyLFU
 
 	s := store.New(maxKeys, policy)
-	srv := server.New(s)
+	srv := server.New(s, loaderURL, 5*time.Minute)
 
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
