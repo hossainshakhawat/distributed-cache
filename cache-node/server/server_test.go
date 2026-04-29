@@ -12,7 +12,7 @@ import (
 )
 
 func newTestServer() *Server {
-	return New(store.New(100, store.PolicyLRU), "", 5*time.Minute)
+	return New(store.New(100, store.PolicyLRU))
 }
 
 func TestHandleHealth(t *testing.T) {

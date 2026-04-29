@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hossainshakhawat/distributed-cache/cache-client/client"
@@ -38,7 +37,6 @@ func New(cache *client.Client, database db.Store, invalidationAddr string) *Hand
 // RegisterRoutes wires HTTP handlers.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/users/", h.handleUser)
-	mux.HandleFunc("/db/load", h.handleLoad)
 	mux.HandleFunc("/health", h.handleHealth)
 }
 
@@ -140,36 +138,6 @@ func (h *Handler) publishInvalidation(ctx context.Context, keys ...string) {
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// handleLoad is called by cache-nodes on a cache miss (read-through pattern).
-// GET /db/load?key=user:{id} — returns the raw JSON bytes for the given key
-// directly from the database, bypassing the cache.
-func (h *Handler) handleLoad(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	key := r.URL.Query().Get("key")
-	idStr, ok := strings.CutPrefix(key, "user:")
-	if !ok {
-		http.Error(w, "unsupported key format; expected user:{id}", http.StatusBadRequest)
-		return
-	}
-	id, err := strconv.Atoi(idStr)
-	if err != nil || id <= 0 {
-		http.Error(w, "invalid user id in key", http.StatusBadRequest)
-		return
-	}
-	user, err := h.db.GetUser(r.Context(), id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(user); err != nil {
-		log.Printf("handleLoad: encode: %v", err)
-	}
 }
 
 func cacheHitHeader(hit bool) string {
