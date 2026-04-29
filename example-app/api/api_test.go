@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,22 +16,33 @@ import (
 )
 
 // newFakeRouter starts an httptest server that simulates the distributed-cache router.
-// getHit controls whether GET /get returns a cache hit; getVal is the value on hit.
-func newFakeRouter(getHit bool, getVal []byte) *httptest.Server {
+// On GET /get the router simulates cache-node read-through: if the key is
+// "user:{1-10}" it returns the user JSON as a hit (mirroring what a real
+// cache-node with a PostgreSQL loader would do).
+func newFakeRouter() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/get":
+			key := r.URL.Query().Get("key")
+			var idStr string
+			var hit bool
+			var val []byte
+			if strings.HasPrefix(key, "user:") {
+				id, err := strconv.Atoi(strings.TrimPrefix(key, "user:"))
+				if err == nil && id >= 1 && id <= 10 {
+					hit = true
+					idStr = strconv.Itoa(id)
+					val, _ = json.Marshal(map[string]any{"id": id, "name": "User " + idStr})
+				}
+			}
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-				"key":   r.URL.Query().Get("key"),
-				"value": getVal,
-				"hit":   getHit,
+				"key": key, "value": val, "hit": hit,
 			})
 		case "/set":
 			w.WriteHeader(http.StatusNoContent)
 		case "/delete":
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-				"key":     r.URL.Query().Get("key"),
-				"deleted": true,
+				"key": r.URL.Query().Get("key"), "deleted": true,
 			})
 		}
 	}))
@@ -48,7 +61,7 @@ func newTestHandler(routerURL, invalidationURL string) (*Handler, db.Store) {
 }
 
 func TestGetUser_CacheMiss_DBHit(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")
@@ -72,9 +85,7 @@ func TestGetUser_CacheMiss_DBHit(t *testing.T) {
 }
 
 func TestGetUser_CacheHit(t *testing.T) {
-	user := db.User{ID: 5, Name: "Cached User"}
-	val, _ := json.Marshal(user)
-	router := newFakeRouter(true, val)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")
@@ -94,7 +105,7 @@ func TestGetUser_CacheHit(t *testing.T) {
 }
 
 func TestGetUser_InvalidID(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")
@@ -112,25 +123,25 @@ func TestGetUser_InvalidID(t *testing.T) {
 }
 
 func TestGetUser_NotFound(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	// DB returns an error for unknown users; the client propagates it as 500.
+	// user:9999 is outside range 1-10 — cache-node returns miss, no value.
 	req := httptest.NewRequest(http.MethodGet, "/users/9999", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", rr.Code)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
 	}
 }
 
 func TestUpdateUser_Success(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	var invalidationReceived bool
@@ -169,7 +180,7 @@ func TestUpdateUser_Success(t *testing.T) {
 }
 
 func TestUpdateUser_BadBody(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")
@@ -186,7 +197,7 @@ func TestUpdateUser_BadBody(t *testing.T) {
 }
 
 func TestUpdateUser_NotFound(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")
@@ -205,7 +216,7 @@ func TestUpdateUser_NotFound(t *testing.T) {
 }
 
 func TestHandleUser_MethodNotAllowed(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")
@@ -222,7 +233,7 @@ func TestHandleUser_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleHealth(t *testing.T) {
-	router := newFakeRouter(false, nil)
+	router := newFakeRouter()
 	defer router.Close()
 
 	h, _ := newTestHandler(router.URL, "")

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	cachedb "github.com/hossainshakhawat/distributed-cache/cache-node/db"
 	"github.com/hossainshakhawat/distributed-cache/cache-node/server"
 	"github.com/hossainshakhawat/distributed-cache/cache-node/store"
 )
@@ -15,8 +16,17 @@ func main() {
 	maxKeys := envIntOrDefault("MAX_KEYS", 100_000)
 	policy := store.PolicyLFU
 
+	var loader server.Loader
+	if connStr := envOrDefault("DATABASE_URL", ""); connStr != "" {
+		d, err := cachedb.New(connStr)
+		if err != nil {
+			log.Fatalf("cache-node: db: %v", err)
+		}
+		loader = d.Load
+	}
+
 	s := store.New(maxKeys, policy)
-	srv := server.New(s)
+	srv := server.New(s, loader)
 
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)

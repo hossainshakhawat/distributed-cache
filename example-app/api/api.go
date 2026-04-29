@@ -61,14 +61,9 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getUser(w http.ResponseWriter, r *http.Request, id int) {
 	cacheKey := fmt.Sprintf("user:%d", id)
 
-	// Cache-aside: try cache first, fallback to DB on miss.
-	val, hit, err := h.cache.Get(r.Context(), cacheKey, func(ctx context.Context, key string) ([]byte, error) {
-		user, dbErr := h.db.GetUser(ctx, id)
-		if dbErr != nil {
-			return nil, dbErr
-		}
-		return json.Marshal(user)
-	})
+	// Cache-aside: the cache-node loads from PostgreSQL on a miss.
+	// No loader closure needed here.
+	val, hit, err := h.cache.Get(r.Context(), cacheKey, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
