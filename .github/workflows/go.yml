@@ -22,7 +22,13 @@ jobs:
         go-version: '1.25.0'
 
     - name: Build
-      run: go build -v ./...
+      run: |
+        for dir in cache-client cache-node router invalidation-service example-app; do
+          echo "=== building $dir ===" && (cd $dir && go build -v ./...)
+        done
 
     - name: Test
-      run: go test -v ./...
+      run: |
+        for dir in cache-client cache-node router invalidation-service example-app; do
+          echo "=== testing $dir ===" && (cd $dir && go test -v ./...)
+        done
