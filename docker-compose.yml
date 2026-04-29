@@ -1,0 +1,87 @@
+services:
+
+  # ── Cache Nodes ─────────────────────────────────────────────────────────────
+  cache-node-1:
+    build:
+      context: .
+      args:
+        SERVICE: cache-node
+    environment:
+      PORT: "8080"
+      MAX_KEYS: "100000"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  cache-node-2:
+    build:
+      context: .
+      args:
+        SERVICE: cache-node
+    environment:
+      PORT: "8080"
+      MAX_KEYS: "100000"
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+
+  cache-node-3:
+    build:
+      context: .
+      args:
+        SERVICE: cache-node
+    environment:
+      PORT: "8080"
+      MAX_KEYS: "100000"
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+
+  # ── Router ───────────────────────────────────────────────────────────────────
+  router:
+    build:
+      context: .
+      args:
+        SERVICE: router
+    environment:
+      PORT: "9000"
+      CACHE_NODES: "http://cache-node-1:8080,http://cache-node-2:8080,http://cache-node-3:8080"
+    ports:
+      - "9000:9000"
+    depends_on:
+      - cache-node-1
+      - cache-node-2
+      - cache-node-3
+    restart: unless-stopped
+
+  # ── Invalidation Service ─────────────────────────────────────────────────────
+  invalidation-service:
+    build:
+      context: .
+      args:
+        SERVICE: invalidation-service
+    environment:
+      PORT: "9100"
+      ROUTER_ADDR: "http://router:9000"
+    ports:
+      - "9100:9100"
+    depends_on:
+      - router
+    restart: unless-stopped
+
+  # ── Example Application ──────────────────────────────────────────────────────
+  example-app:
+    build:
+      context: .
+      args:
+        SERVICE: example-app
+    environment:
+      PORT: "8888"
+      ROUTER_ADDR: "http://router:9000"
+      INVALIDATION_ADDR: "http://invalidation-service:9100"
+    ports:
+      - "8888:8888"
+    depends_on:
+      - router
+      - invalidation-service
+    restart: unless-stopped

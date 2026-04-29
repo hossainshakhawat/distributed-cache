@@ -1,0 +1,9 @@
+go 1.22
+
+use (
+	./cache-client
+	./cache-node
+	./example-app
+	./invalidation-service
+	./router
+)
