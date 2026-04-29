@@ -15,8 +15,8 @@ import (
 // Server exposes the Store over HTTP.
 type Server struct {
 	store  *store.Store
-	db     *cachedb.DB  // optional; nil = no DB integration
-	flight flightGroup  // deduplicates concurrent DB loads for the same key
+	db     *cachedb.DB // optional; nil = no DB integration
+	flight flightGroup // deduplicates concurrent DB loads for the same key
 }
 
 // New creates a new HTTP server wrapping the given store.
