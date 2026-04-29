@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/distributed-cache/cache-node/store"
+	"github.com/hossainshakhawat/distributed-cache/cache-node/store"
 )
 
 // Server exposes the Store over HTTP.

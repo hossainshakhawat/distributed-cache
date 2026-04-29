@@ -12,16 +12,16 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/distributed-cache/cache-client/client"
-	"github.com/distributed-cache/example-app/db"
+	"github.com/hossainshakhawat/distributed-cache/cache-client/client"
+	"github.com/hossainshakhawat/distributed-cache/example-app/db"
 )
 
 // Handler serves user endpoints backed by cache + DB.
 type Handler struct {
-	cache              *client.Client
-	db                 *db.DB
-	invalidationAddr   string
-	httpClient         *http.Client
+	cache            *client.Client
+	db               *db.DB
+	invalidationAddr string
+	httpClient       *http.Client
 }
 
 // New creates an API Handler.

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/distributed-cache/router/hashring"
-	"github.com/distributed-cache/router/proxy"
+	"github.com/hossainshakhawat/distributed-cache/router/hashring"
+	"github.com/hossainshakhawat/distributed-cache/router/proxy"
 )
 
 const replicationFactor = 2

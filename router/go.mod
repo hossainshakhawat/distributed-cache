@@ -1,3 +1,3 @@
-module github.com/distributed-cache/router
+module github.com/hossainshakhawat/distributed-cache/router
 
-go 1.22
+go 1.25.0

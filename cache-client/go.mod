@@ -1,3 +1,3 @@
-module github.com/distributed-cache/cache-client
+module github.com/hossainshakhawat/distributed-cache/cache-client
 
-go 1.22
+go 1.25.0

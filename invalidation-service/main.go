@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/distributed-cache/invalidation-service/invalidator"
-	"github.com/distributed-cache/invalidation-service/queue"
-	"github.com/distributed-cache/invalidation-service/server"
+	"github.com/hossainshakhawat/distributed-cache/invalidation-service/invalidator"
+	"github.com/hossainshakhawat/distributed-cache/invalidation-service/queue"
+	"github.com/hossainshakhawat/distributed-cache/invalidation-service/server"
 )
 
 func main() {

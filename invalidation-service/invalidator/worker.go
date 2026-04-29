@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/distributed-cache/invalidation-service/queue"
+	"github.com/hossainshakhawat/distributed-cache/invalidation-service/queue"
 )
 
 // Worker reads events from the bus and issues DELETE calls to the router.

@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/distributed-cache/invalidation-service/queue"
+	"github.com/hossainshakhawat/distributed-cache/invalidation-service/queue"
 )
 
 // Server accepts invalidation events over HTTP and forwards them to the Bus.

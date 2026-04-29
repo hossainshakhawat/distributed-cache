@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/distributed-cache/router/server"
+	"github.com/hossainshakhawat/distributed-cache/router/server"
 )
 
 func main() {

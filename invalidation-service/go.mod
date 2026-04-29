@@ -1,3 +1,3 @@
-module github.com/distributed-cache/invalidation-service
+module github.com/hossainshakhawat/distributed-cache/invalidation-service
 
-go 1.22
+go 1.25.0

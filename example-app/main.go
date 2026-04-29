@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/distributed-cache/cache-client/client"
-	"github.com/distributed-cache/example-app/api"
-	"github.com/distributed-cache/example-app/db"
+	"github.com/hossainshakhawat/distributed-cache/cache-client/client"
+	"github.com/hossainshakhawat/distributed-cache/example-app/api"
+	"github.com/hossainshakhawat/distributed-cache/example-app/db"
 )
 
 func main() {

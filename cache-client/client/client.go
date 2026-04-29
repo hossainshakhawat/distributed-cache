@@ -13,8 +13,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/distributed-cache/cache-client/localcache"
-	"github.com/distributed-cache/cache-client/stampede"
+	"github.com/hossainshakhawat/distributed-cache/cache-client/localcache"
+	"github.com/hossainshakhawat/distributed-cache/cache-client/stampede"
 )
 
 // Loader is a function that loads a value from the source of truth (e.g. DB).

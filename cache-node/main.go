@@ -6,8 +6,8 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/distributed-cache/cache-node/server"
-	"github.com/distributed-cache/cache-node/store"
+	"github.com/hossainshakhawat/distributed-cache/cache-node/server"
+	"github.com/hossainshakhawat/distributed-cache/cache-node/store"
 )
 
 func main() {
