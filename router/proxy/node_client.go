@@ -112,3 +112,22 @@ func (n *NodeClient) Delete(ctx context.Context, key string) (*DeleteResponse, e
 
 // Addr returns the node's address.
 func (n *NodeClient) Addr() string { return n.addr }
+
+// Update calls POST /db/update on the node, writing to PostgreSQL and
+// refreshing the cache entry. Returns the raw response body and HTTP status.
+func (n *NodeClient) Update(ctx context.Context, key, name string) ([]byte, int, error) {
+	body, _ := json.Marshal(map[string]string{"key": key, "name": name})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		n.addr+"/db/update", bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	val, err := io.ReadAll(resp.Body)
+	return val, resp.StatusCode, err
+}

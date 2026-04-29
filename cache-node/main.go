@@ -16,17 +16,17 @@ func main() {
 	maxKeys := envIntOrDefault("MAX_KEYS", 100_000)
 	policy := store.PolicyLFU
 
-	var loader server.Loader
+	var db *cachedb.DB
 	if connStr := envOrDefault("DATABASE_URL", ""); connStr != "" {
 		d, err := cachedb.New(connStr)
 		if err != nil {
 			log.Fatalf("cache-node: db: %v", err)
 		}
-		loader = d.Load
+		db = d
 	}
 
 	s := store.New(maxKeys, policy)
-	srv := server.New(s, loader)
+	srv := server.New(s, db)
 
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)

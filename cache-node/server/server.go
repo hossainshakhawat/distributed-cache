@@ -7,23 +7,21 @@ import (
 	"strconv"
 	"time"
 
+	cachedb "github.com/hossainshakhawat/distributed-cache/cache-node/db"
 	"github.com/hossainshakhawat/distributed-cache/cache-node/store"
 )
 
-// Loader is called by the server on a cache miss to fetch the value directly
-// from the source of truth (PostgreSQL). Returning (nil, nil) means "not found".
-type Loader func(key string) ([]byte, error)
-
 // Server exposes the Store over HTTP.
 type Server struct {
-	store  *store.Store
-	loader Loader // optional; called on miss to populate the store
+	store *store.Store
+	db    *cachedb.DB // optional; nil = no DB integration
 }
 
 // New creates a new HTTP server wrapping the given store.
-// loader may be nil, in which case misses are returned as-is.
-func New(s *store.Store, loader Loader) *Server {
-	return &Server{store: s, loader: loader}
+// db may be nil, in which case cache misses are returned as-is and
+// /db/update returns 503.
+func New(s *store.Store, db *cachedb.DB) *Server {
+	return &Server{store: s, db: db}
 }
 
 // RegisterRoutes wires HTTP handlers.
@@ -31,6 +29,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/get", s.handleGet)
 	mux.HandleFunc("/set", s.handleSet)
 	mux.HandleFunc("/delete", s.handleDelete)
+	mux.HandleFunc("/db/update", s.handleDbUpdate)
 	mux.HandleFunc("/health", s.handleHealth)
 }
 
@@ -77,11 +76,11 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e, hit := s.store.Get(key)
-	if !hit && s.loader != nil {
-		// Cache miss: load from the source of truth, populate the store.
-		val, err := s.loader(key)
+	if !hit && s.db != nil {
+		// Cache miss: load from PostgreSQL, populate the store.
+		val, err := s.db.Load(key)
 		if err != nil {
-			log.Printf("cache-node: loader %q: %v", key, err)
+			log.Printf("cache-node: load %q: %v", key, err)
 		} else if val != nil {
 			s.store.Set(key, val, 5*time.Minute, 0)
 			writeJSON(w, http.StatusOK, GetResponse{Key: key, Hit: true, Value: val})
@@ -133,6 +132,42 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status": "ok",
 		"keys":   strconv.Itoa(s.store.Len()),
 	})
+}
+
+// UpdateRequest is the body for POST /db/update.
+type UpdateRequest struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
+func (s *Server) handleDbUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.db == nil {
+		http.Error(w, "db not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var req UpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	val, err := s.db.Update(req.Key, req.Name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if val == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	// Store the fresh value so the next GET is an immediate hit.
+	s.store.Set(req.Key, val, 5*time.Minute, 0)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(val)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

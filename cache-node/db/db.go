@@ -1,6 +1,6 @@
-// Package db provides a read-only PostgreSQL loader for the cache-node.
-// On a cache miss the server calls Load(key); the result is stored and
-// returned as a cache hit so the client never needs a loader closure.
+// Package db provides PostgreSQL read/write access for the cache-node.
+// On a cache miss the server calls Load(key) to fill the cache.
+// On a PUT the server calls Update(key, name) to persist the change and refresh the cache.
 package db
 
 import (
@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 )
@@ -62,6 +63,34 @@ func (d *DB) Load(key string) ([]byte, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cache-node/db: load %q: %w", key, err)
+	}
+	return json.Marshal(u)
+}
+
+// Update updates the user's name for the given key in PostgreSQL and returns
+// the updated record as JSON.
+// Returns (nil, nil) when the key format is not recognised or the user is not found.
+func (d *DB) Update(key, name string) ([]byte, error) {
+	idStr, ok := strings.CutPrefix(key, "user:")
+	if !ok {
+		return nil, nil
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("cache-node/db: bad key %q: %w", key, err)
+	}
+	u := &user{}
+	err = d.conn.QueryRow(
+		`UPDATE users SET name = $1, updated_at = $2
+		 WHERE id = $3
+		 RETURNING id, name, updated_at`,
+		name, time.Now().UnixNano(), id,
+	).Scan(&u.ID, &u.Name, &u.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil // not found
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cache-node/db: update %q: %w", key, err)
 	}
 	return json.Marshal(u)
 }

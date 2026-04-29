@@ -39,6 +39,7 @@ func (ro *Router) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/get", ro.handleGet)
 	mux.HandleFunc("/set", ro.handleSet)
 	mux.HandleFunc("/delete", ro.handleDelete)
+	mux.HandleFunc("/db/update", ro.handleDbUpdate)
 	mux.HandleFunc("/nodes", ro.handleNodes)
 	mux.HandleFunc("/health", ro.handleHealth)
 }
@@ -177,7 +178,7 @@ func (ro *Router) handleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		resp, err := c.Delete(ctx, key)
 		if err != nil {
-			log.Printf("router DELETE %s → %s: %v", key, addr, err)
+			log.Printf("router DELETE %s \u2192 %s: %v", key, addr, err)
 			continue
 		}
 		if resp.Deleted {
@@ -185,6 +186,48 @@ func (ro *Router) handleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, deleteResponse{Key: key, Deleted: deleted})
+}
+
+// handleDbUpdate routes a write-through update to the primary cache-node for
+// the key. The cache-node persists to PostgreSQL, refreshes its cache entry,
+// and returns the updated record as JSON.
+func (ro *Router) handleDbUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Key  string `json:"key"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	// Route to the primary node only (DB write must happen exactly once).
+	nodes := ro.ring.GetNodes(req.Key, 1)
+	if len(nodes) == 0 {
+		http.Error(w, "no cache nodes available", http.StatusServiceUnavailable)
+		return
+	}
+	c := ro.nodeClient(nodes[0])
+	if c == nil {
+		http.Error(w, "node unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	val, status, err := c.Update(ctx, req.Key, req.Name)
+	if err != nil {
+		log.Printf("router /db/update %s \u2192 %s: %v", req.Key, nodes[0], err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(val)
 }
 
 func (ro *Router) handleNodes(w http.ResponseWriter, r *http.Request) {

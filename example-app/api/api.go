@@ -13,22 +13,22 @@ import (
 	"time"
 
 	"github.com/hossainshakhawat/distributed-cache/cache-client/client"
-	"github.com/hossainshakhawat/distributed-cache/example-app/db"
 )
 
-// Handler serves user endpoints backed by cache + DB.
+// Handler serves user endpoints backed by the distributed cache cluster.
 type Handler struct {
 	cache            *client.Client
-	db               db.Store
+	routerAddr       string
 	invalidationAddr string
 	httpClient       *http.Client
 }
 
 // New creates an API Handler.
-func New(cache *client.Client, database db.Store, invalidationAddr string) *Handler {
+// routerAddr is used for write-through updates (POST /db/update).
+func New(cache *client.Client, routerAddr, invalidationAddr string) *Handler {
 	return &Handler{
 		cache:            cache,
-		db:               database,
+		routerAddr:       routerAddr,
 		invalidationAddr: invalidationAddr,
 		httpClient:       &http.Client{Timeout: time.Second},
 	}
@@ -88,23 +88,39 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
-	// 1. Update DB.
-	updated, err := h.db.UpdateUser(r.Context(), id, body.Name)
+	cacheKey := fmt.Sprintf("user:%d", id)
+
+	// Write to PostgreSQL and refresh the cache via router → cache-node.
+	payload, _ := json.Marshal(map[string]string{"key": cacheKey, "name": body.Name})
+	updReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+		h.routerAddr+"/db/update", bytes.NewReader(payload))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// 2. Invalidate cache (delete pattern).
-	cacheKey := fmt.Sprintf("user:%d", id)
-	if delErr := h.cache.Delete(r.Context(), cacheKey); delErr != nil {
-		log.Printf("api: cache delete %s: %v", cacheKey, delErr)
+	updReq.Header.Set("Content-Type", "application/json")
+	resp, err := h.httpClient.Do(updReq)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+	updated, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "update failed", http.StatusInternalServerError)
+		return
 	}
 
-	// 3. Publish invalidation event (for other services that may cache this key).
+	// Publish invalidation so other cache-nodes evict the stale entry.
 	h.publishInvalidation(r.Context(), cacheKey)
 
-	writeJSON(w, http.StatusOK, updated)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(updated)
 }
 
 // publishInvalidation sends an invalidation event to the invalidation service.

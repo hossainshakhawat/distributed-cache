@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,31 +11,48 @@ import (
 	"time"
 
 	"github.com/hossainshakhawat/distributed-cache/cache-client/client"
-	"github.com/hossainshakhawat/distributed-cache/example-app/db"
 )
 
-// newFakeRouter starts an httptest server that simulates the distributed-cache router.
-// On GET /get the router simulates cache-node read-through: if the key is
-// "user:{1-10}" it returns the user JSON as a hit (mirroring what a real
-// cache-node with a PostgreSQL loader would do).
+// newFakeRouter starts an httptest server simulating the distributed-cache router.
+//
+//   - GET  /get         — returns a cache hit for user:1-10 (read-through simulation)
+//   - POST /db/update   — updates a user; returns 200+JSON for user:1-10, 404 for others
+//   - POST /set         — no-op, 204
+//   - DELETE /delete    — no-op, returns deleted:true
 func newFakeRouter() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/get":
 			key := r.URL.Query().Get("key")
-			var idStr string
 			var hit bool
 			var val []byte
 			if strings.HasPrefix(key, "user:") {
 				id, err := strconv.Atoi(strings.TrimPrefix(key, "user:"))
 				if err == nil && id >= 1 && id <= 10 {
 					hit = true
-					idStr = strconv.Itoa(id)
-					val, _ = json.Marshal(map[string]any{"id": id, "name": "User " + idStr})
+					val, _ = json.Marshal(map[string]any{"id": id, "name": "User " + strconv.Itoa(id)})
 				}
 			}
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 				"key": key, "value": val, "hit": hit,
+			})
+		case "/db/update":
+			var req struct {
+				Key  string `json:"key"`
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			id, err := strconv.Atoi(strings.TrimPrefix(req.Key, "user:"))
+			if err != nil || id < 1 || id > 10 {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"id": id, "name": req.Name,
 			})
 		case "/set":
 			w.WriteHeader(http.StatusNoContent)
@@ -48,23 +64,22 @@ func newFakeRouter() *httptest.Server {
 	}))
 }
 
-// newTestHandler builds a Handler with an in-memory DB and a cache client pointed at routerURL.
-func newTestHandler(routerURL, invalidationURL string) (*Handler, db.Store) {
-	database := db.NewInMemory()
+// newTestHandler builds a Handler wired to the given fake router and invalidation server.
+func newTestHandler(routerURL, invalidationURL string) *Handler {
 	cacheClient := client.New(client.Options{
 		RouterAddr:     routerURL,
 		LocalCacheSize: 10,
 		LocalCacheTTL:  time.Millisecond,
 		HTTPTimeout:    time.Second,
 	})
-	return New(cacheClient, database, invalidationURL), database
+	return New(cacheClient, routerURL, invalidationURL)
 }
 
 func TestGetUser_CacheMiss_DBHit(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -75,7 +90,9 @@ func TestGetUser_CacheMiss_DBHit(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	var u db.User
+	var u struct {
+		ID int `json:"id"`
+	}
 	if err := json.NewDecoder(rr.Body).Decode(&u); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +105,7 @@ func TestGetUser_CacheHit(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -108,7 +125,7 @@ func TestGetUser_InvalidID(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -126,7 +143,7 @@ func TestGetUser_NotFound(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -153,7 +170,7 @@ func TestUpdateUser_Success(t *testing.T) {
 	}))
 	defer invalidSrv.Close()
 
-	h, database := newTestHandler(router.URL, invalidSrv.URL)
+	h := newTestHandler(router.URL, invalidSrv.URL)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -166,9 +183,11 @@ func TestUpdateUser_Success(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	// Verify DB was actually updated.
-	u, err := database.GetUser(context.Background(), 1)
-	if err != nil {
+	// Verify the response body contains the updated name.
+	var u struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&u); err != nil {
 		t.Fatal(err)
 	}
 	if u.Name != "Updated" {
@@ -183,7 +202,7 @@ func TestUpdateUser_BadBody(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -200,7 +219,7 @@ func TestUpdateUser_NotFound(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -219,7 +238,7 @@ func TestHandleUser_MethodNotAllowed(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -236,7 +255,7 @@ func TestHandleHealth(t *testing.T) {
 	router := newFakeRouter()
 	defer router.Close()
 
-	h, _ := newTestHandler(router.URL, "")
+	h := newTestHandler(router.URL, "")
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 

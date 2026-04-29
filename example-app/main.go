@@ -7,7 +7,6 @@ import (
 
 	"github.com/hossainshakhawat/distributed-cache/cache-client/client"
 	"github.com/hossainshakhawat/distributed-cache/example-app/api"
-	"github.com/hossainshakhawat/distributed-cache/example-app/db"
 )
 
 func main() {
@@ -19,12 +18,7 @@ func main() {
 		RouterAddr: routerAddr,
 	})
 
-	connStr := envOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/appdb?sslmode=disable")
-	database, err := db.New(connStr)
-	if err != nil {
-		log.Fatalf("example-app: db: %v", err)
-	}
-	handler := api.New(cacheClient, database, invalidationAddr)
+	handler := api.New(cacheClient, routerAddr, invalidationAddr)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
